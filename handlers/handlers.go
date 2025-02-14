@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 type Handler struct {
-	r *repos.UserRepository
+	r repos.UsersInterface
 }
 
 func NewHandler(db *sql.DB) *Handler {
@@ -32,6 +34,60 @@ func (h *Handler) GetUsers(w http.ResponseWriter, r *http.Request) {
 	if err := writeJSON(w, 200, users); err != nil {
 		log.Printf("error writing JSON response: %v", err)
 	}
+}
+
+func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
+
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		return
+	}
+
+	id, err := strconv.Atoi(parts[2])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.r.GetUser(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	if err := writeJSON(w, 200, user); err != nil {
+		log.Printf("error writing JSON response: %v", err)
+	}
+}
+
+func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		return
+	}
+
+	id, err := strconv.Atoi(parts[2])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	err = h.r.DeleteUser(r.Context(), id)
+
+	if err != nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, 200, map[string]string{
+		"message": "User was successfully deleted",
+	})
 }
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
@@ -59,5 +115,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, user)
+	if err := writeJSON(w, 200, user); err != nil {
+		log.Printf("error writing JSON response: %v", err)
+	}
 }
