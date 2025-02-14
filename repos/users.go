@@ -3,6 +3,7 @@ package repos
 import (
 	"context"
 	"database/sql"
+	"errors"
 )
 
 type UserRepository struct {
@@ -15,7 +16,7 @@ type User struct {
 	Email string `json:"email"`
 }
 
-func NewUserRepository(db *sql.DB) *UserRepository {
+func NewUserRepository(db *sql.DB) UsersInterface {
 	return &UserRepository{db: db}
 }
 
@@ -40,6 +41,45 @@ func (r *UserRepository) GetUsers(ctx context.Context) ([]User, error) {
 	}
 
 	return users, nil
+}
+
+func (r *UserRepository) GetUser(ctx context.Context, userID int) (*User, error) {
+	var user User
+
+	err := r.db.QueryRowContext(
+		ctx,
+		"SELECT * FROM users WHERE id = $1",
+		userID,
+	).Scan(&user.ID, &user.Name, &user.Email)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func (r *UserRepository) DeleteUser(ctx context.Context, userID int) error {
+
+	result, err := r.db.ExecContext(
+		ctx,
+		"DELETE FROM users WHERE id = $1",
+		userID,
+	)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return errors.New("user not found")
+	}
+
+	return nil
 }
 
 func (r *UserRepository) CreateUser(ctx context.Context, name, email string) (*User, error) {
