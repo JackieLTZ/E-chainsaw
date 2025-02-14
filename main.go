@@ -41,9 +41,11 @@ func main() {
 	userHandler := handlers.NewHandler(db)
 
 	mux := http.NewServeMux()
-	mux.Handle("/ping", loggingMiddleware(http.HandlerFunc(userHandler.Ping)))
-	mux.Handle("/users", loggingMiddleware(http.HandlerFunc(userHandler.CreateUser)))
-	mux.Handle("/u", loggingMiddleware(http.HandlerFunc(userHandler.GetUsers)))
+	mux.Handle("GET /ping", loggingMiddleware(http.HandlerFunc(userHandler.Ping)))
+	mux.Handle("GET /users/{id}", loggingMiddleware(http.HandlerFunc(userHandler.GetUser)))
+	mux.Handle("GET /users", loggingMiddleware(http.HandlerFunc(userHandler.GetUsers)))
+	mux.Handle("POST /users", loggingMiddleware(http.HandlerFunc(userHandler.CreateUser)))
+	mux.Handle("DELETE /users/{id}", loggingMiddleware(http.HandlerFunc(userHandler.DeleteUser)))
 
 	server.Handler = mux
 
