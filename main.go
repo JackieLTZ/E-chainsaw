@@ -3,6 +3,8 @@ package main
 import (
 	"a/handlers"
 	"context"
+	"database/sql"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -24,12 +26,27 @@ func main() {
 	if err != nil {
 		log.Fatalf("error connecting to database: %v", err)
 	}
-	defer db.Close()
+
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database connection: %v", err)
+		}
+		log.Println("Database connection closed.")
+	}()
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
+
+	err = runServer(port, db)
+	if err != nil {
+		log.Fatalf("Server exited with error: %v", err)
+	}
+
+}
+
+func runServer(port string, db *sql.DB) error {
 
 	server := &http.Server{
 		Addr:         ":" + port,
@@ -49,37 +66,37 @@ func main() {
 
 	server.Handler = mux
 
-	serverCtx, serverStopCtx := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer cancel()
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	go func() {
-		<-sig
+	serr := make(chan error, 1)
 
-		shutdownCtx, cancelShutdown := context.WithTimeout(serverCtx, 30*time.Second)
-		defer cancelShutdown()
+	go func() { serr <- server.ListenAndServe() }()
 
-		go func() {
-			<-shutdownCtx.Done()
-			if shutdownCtx.Err() == context.DeadlineExceeded {
-				log.Fatal("graceful shutdown timed out.. forcing exit.")
-			}
-		}()
-
-		err := server.Shutdown(shutdownCtx)
-		if err != nil {
-			log.Printf("error shutting down server: %v", err)
+	var servErr error
+	select {
+	case servErr = <-serr:
+		if servErr != nil {
+			log.Printf("Server error: %v", servErr)
 		}
-		serverStopCtx()
-	}()
-
-	log.Printf("Server starting on port %s...\n", port)
-	err = server.ListenAndServe()
-	if err != nil && err != http.ErrServerClosed {
-		log.Printf("error starting server: %v", err)
-		os.Exit(1)
+	case <-ctx.Done():
+		log.Println("Shutdown signal received")
 	}
 
-	<-serverCtx.Done()
-	log.Println("Server stopped")
+	sdctx, sdcancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer sdcancel()
+
+	shutdownErr := server.Shutdown(sdctx)
+	switch {
+	case shutdownErr == context.DeadlineExceeded:
+		return errors.New("graceful shutdown timed out")
+	case shutdownErr != nil:
+		log.Printf("Error during shutdown: %v", shutdownErr)
+		return errors.Join(servErr, shutdownErr)
+	case servErr != nil && !errors.Is(servErr, http.ErrServerClosed):
+		return servErr
+	default:
+		log.Println("Server shutdown completed successfully")
+		return nil
+	}
 }
